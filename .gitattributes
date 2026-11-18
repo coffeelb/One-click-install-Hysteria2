@@ -1,2 +1,2 @@
-# 脚本要在 Linux 上执行，任何时候都不要被转成 CRLF
+# Keep LF line endings for scripts that run on Linux.
 * text=auto eol=lf

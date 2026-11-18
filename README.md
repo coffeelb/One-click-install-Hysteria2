@@ -22,7 +22,7 @@ systemd is required, so OpenWrt / Alpine / NixOS are not supported. Run it with 
 ## Requirements
 
 - root, on a systemd-based distribution (Debian 11+, Ubuntu 22.04 LTS+, Rocky Linux 8+, CentOS Stream 8+, ...)
-- a domain that resolves to this server — **do not enable the Cloudflare CDN**
+- a domain that resolves to this server. **Do not enable the Cloudflare CDN.**
 - port 80 free and reachable from the internet (ACME uses it for the HTTP challenge)
 - the firewall must allow the **UDP** port you pick, since Hysteria clients speak QUIC over UDP, not TCP
 

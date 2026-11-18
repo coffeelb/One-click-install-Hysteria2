@@ -1,10 +1,10 @@
 #!/bin/bash
 #
-# Hysteria 2 一键安装脚本（加固版）
+# Hysteria 2 one-click installer (hardened)
 
-# bash 特性（[[ ]]、${var,,} 等）本脚本用了不少，被 sh/dash 执行会报难懂的错误
+# Bash-specific features such as [[ ]] and ${var,,} cause errors in sh or dash.
 if [ -z "${BASH_VERSION:-}" ]; then
-    echo "请用 bash 运行本脚本：bash hy2.sh" >&2
+    echo "Run this script with Bash: bash hy2.sh" >&2
     exit 1
 fi
 
@@ -26,15 +26,15 @@ die()  { err "$*"; exit 1; }
 has_cmd() { command -v "$1" >/dev/null 2>&1; }
 
 need_root() {
-    [ "$(id -u)" -eq 0 ] || die "请用 root 运行：sudo bash hy2.sh"
+    [ "$(id -u)" -eq 0 ] || die "Run as root: sudo bash hy2.sh"
 }
 
 need_deps() {
-    has_cmd curl || die "缺少 curl，请先安装：apt -y install curl"
-    has_cmd systemctl || die "本脚本需要 systemd（不支持 OpenWrt / Alpine / NixOS）"
+    has_cmd curl || die "curl is required. Install it first: apt -y install curl"
+    has_cmd systemctl || die "This script requires systemd. OpenWrt, Alpine, and NixOS are unsupported."
 }
 
-# 端口占用检查。返回 0 = 被占用，1 = 空闲，2 = 系统里没有工具、判断不了
+# Return 0 if the port is in use, 1 if it is free, or 2 if no check tool is available.
 port_in_use() {
     local pat="[:.]$1[[:space:]]"
     if has_cmd ss; then
@@ -60,10 +60,10 @@ valid_domain() { [[ $1 =~ ^([A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?\.)+[A-Za-z]{2
 valid_email()  { [[ $1 =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; }
 valid_speed()  { [[ $1 =~ ^[0-9]+([.][0-9]+)?$ ]]; }
 
-# 生成 bandwidth 片段。up = 服务器上行 = 客户端下载，down = 服务器下行 = 客户端上传。
-# 两个方向都填 0 时不写这一段，也就是不设限：
-# 此时用 Hysteria 自带的拥塞控制（congestion.type，默认 bbr），而不是 Brutal 限速。
-# 注意这里的 bbr 是 Hysteria 在 QUIC/UDP 上的用户态实现，跟内核 TCP BBR 无关。
+# Generate the bandwidth section. Server upload is client download, and vice versa.
+# Omit the section when both values are 0 to leave bandwidth unlimited.
+# Hysteria then uses its own congestion control (congestion.type, defaults to bbr).
+# Hysteria implements BBR in userspace over QUIC/UDP, independently of kernel TCP BBR.
 bandwidth_block() {
     local up=$1 down=$2
     if [ "$up" = "0" ] && [ "$down" = "0" ]; then
@@ -75,7 +75,7 @@ bandwidth_block() {
     return 0
 }
 
-# YAML 双引号转义，避免密码里的引号或反斜杠破坏配置文件
+# Escape double quotes and backslashes in passwords for YAML.
 yaml_quote() { local s=${1//\\/\\\\}; printf '"%s"' "${s//\"/\\\"}"; }
 
 confirm() {
@@ -86,33 +86,33 @@ confirm() {
 
 firewall_hint() {
     local port=$1
-    warn "客户端连的是 ${port}/udp（Hysteria 走 QUIC），ACME 签证书还需要 80/tcp"
+    warn "Clients connect over QUIC on ${port}/udp. ACME certificate issuance also requires 80/tcp."
     if has_cmd ufw && ufw status 2>/dev/null | grep -q '^Status: active'; then
-        warn "检测到 ufw 已启用，请放行：ufw allow 80/tcp && ufw allow ${port}/udp"
+        warn "ufw is active. Allow the required ports: ufw allow 80/tcp && ufw allow ${port}/udp"
     elif has_cmd firewall-cmd && systemctl is-active --quiet firewalld; then
-        warn "检测到 firewalld 已启用，请放行："
+        warn "firewalld is active. Allow the required ports:"
         warn "  firewall-cmd --permanent --add-port=80/tcp --add-port=${port}/udp && firewall-cmd --reload"
     elif has_cmd iptables && iptables -S INPUT 2>/dev/null | grep -qE -- '-j (DROP|REJECT)'; then
-        warn "iptables 存在默认拒绝规则，请自行放行 80/tcp 与 ${port}/udp"
+        warn "iptables has drop or reject rules. Allow 80/tcp and ${port}/udp."
     fi
 }
 
-# 从 systemd unit 里读服务运行用户（官方安装器默认是 hysteria，可用 --user 改）
+# Read the service user from the systemd unit. The official installer defaults to hysteria and supports --user.
 service_user() {
     local u
     u=$(sed -n 's/^User=//p' "/etc/systemd/system/$SERVICE" 2>/dev/null | tail -n1)
     printf '%s' "${u:-hysteria}"
 }
 
-# 下载并执行官方安装器。
-# 直接写 bash <(curl ...) 有个坑：curl 失败时会得到一个"空脚本"，
-# 而 bash 执行空输入返回 0，于是下载失败被静默吞掉，后面一路错下去。
+# Download and run the official installer.
+# With bash <(curl ...), a failed download can leave Bash with an empty script.
+# Bash returns success on empty input, silently hiding the download failure.
 run_official_installer() {
     local tmp rc
-    tmp=$(mktemp) || { err "无法创建临时文件"; return 1; }
+    tmp=$(mktemp) || { err "Could not create a temporary file"; return 1; }
     if ! curl -fsSL "$INSTALLER_URL" -o "$tmp"; then
         rm -f "$tmp"
-        err "下载官方安装器失败：$INSTALLER_URL（检查网络或 DNS）"
+        err "Could not download the official installer from $INSTALLER_URL. Check your network or DNS."
         return 1
     fi
     bash "$tmp" "$@"
@@ -125,64 +125,64 @@ do_install() {
     local port domain email password bw_up bw_down bak st i ok=0 svcuser
 
     echo
-    info "安装向导（直接回车使用默认值）"
+    info "Installation wizard (press Enter to accept the defaults)"
 
-    read -rp "端口 (默认 8443): " port || return 0
+    read -rp "UDP port (default 8443): " port || return 0
     port=${port:-8443}
     [[ $port =~ ^[0-9]+$ ]] && (( 10#$port >= 1 && 10#$port <= 65535 )) \
-        || { err "端口不合法：$port"; return 1; }
+        || { err "Invalid port: $port"; return 1; }
 
-    read -rp "域名 (已解析到本机 IP，且未开启 CDN): " domain || return 0
+    read -rp "Domain name (must resolve to this server's IP with the CDN disabled): " domain || return 0
     domain=${domain#http://}; domain=${domain#https://}; domain=${domain%%/*}
     domain=${domain%.}; domain=${domain,,}
     valid_domain "$domain" \
-        || { err "域名不合法：$domain（应为形如 us.example.com 的域名，不能是 IP）"; return 1; }
+        || { err "Invalid domain: $domain. Enter a hostname such as us.example.com."; return 1; }
 
-    read -rp "ACME 邮箱 (留空使用 admin@$domain): " email || return 0
+    read -rp "ACME email address (default admin@$domain): " email || return 0
     email=${email:-admin@$domain}
-    valid_email "$email" || { err "邮箱不合法：$email"; return 1; }
+    valid_email "$email" || { err "Invalid email address: $email"; return 1; }
 
-    read -rp "密码 (留空自动生成随机强密码): " password || return 0
+    read -rp "Password (leave blank to generate a strong random password): " password || return 0
     if [ -z "$password" ]; then
         password=$(gen_password)
-        info "已自动生成密码：$password"
+        info "Generated password: $password"
     fi
 
-    read -rp "服务器上行 = 客户端下载 (Mbps，默认 0 不限速): " bw_up || return 0
+    read -rp "Server upload / client download (Mbps, default 0 for unlimited): " bw_up || return 0
     bw_up=${bw_up:-0}
-    valid_speed "$bw_up" || { err "速度值不合法：$bw_up（只能是数字，例如 100 或 50.5）"; return 1; }
+    valid_speed "$bw_up" || { err "Invalid bandwidth: $bw_up. Enter a number such as 100 or 50.5."; return 1; }
 
-    read -rp "服务器下行 = 客户端上传 (Mbps，默认 0 不限速): " bw_down || return 0
+    read -rp "Server download / client upload (Mbps, default 0 for unlimited): " bw_down || return 0
     bw_down=${bw_down:-0}
-    valid_speed "$bw_down" || { err "速度值不合法：$bw_down（只能是数字，例如 100 或 50.5）"; return 1; }
+    valid_speed "$bw_down" || { err "Invalid bandwidth: $bw_down. Enter a number such as 100 or 50.5."; return 1; }
 
     port_in_use 80; st=$?
     case $st in
-        0) warn "80 端口已被占用，ACME 的 HTTP 校验会失败"
-           confirm "仍要继续？" || return 0 ;;
-        2) warn "系统里没有 ss/netstat，跳过端口占用检查" ;;
+        0) warn "Port 80 is already in use. The ACME HTTP challenge will fail."
+           confirm "Continue anyway?" || return 0 ;;
+        2) warn "Neither ss nor netstat is available. Skipping the port check." ;;
     esac
     if [ "$port" != 443 ]; then
         port_in_use "$port"; st=$?
         if [ $st -eq 0 ]; then
-            warn "$port 端口已被占用（如果是本机已装好的 Hysteria 在占用，属正常）"
-            confirm "仍要继续？" || return 0
+            warn "Port $port is already in use. This is expected if an existing Hysteria service uses it."
+            confirm "Continue anyway?" || return 0
         fi
     fi
 
     if [ -s "$CONFIG_FILE" ]; then
         bak="${CONFIG_FILE}.bak.$(date +%Y%m%d-%H%M%S)"
-        cp -a "$CONFIG_FILE" "$bak" && info "原配置已备份至 $bak"
+        cp -a "$CONFIG_FILE" "$bak" && info "Backed up the previous configuration to $bak"
     fi
 
-    info "调用官方安装器安装 Hysteria 2 ..."
-    run_official_installer || die "官方安装器执行失败，已中止"
+    info "Running the official Hysteria 2 installer ..."
+    run_official_installer || die "The official installer failed. Installation aborted."
 
-    # 证书固定放在 CONFIG_DIR 下，默认位置在 hysteria 用户家目录里，不好排查
+    # Store certificates under CONFIG_DIR for easier troubleshooting.
     svcuser=$(service_user)
     mkdir -p "$ACME_DIR"
     chown -R "$svcuser" "$ACME_DIR" 2>/dev/null \
-        || warn "无法把 $ACME_DIR 归属给 $svcuser 用户，ACME 可能失败"
+        || warn "Could not set the owner of $ACME_DIR to $svcuser. ACME may fail."
     chmod 700 "$ACME_DIR"
     mkdir -p "$CONFIG_DIR"
     install -m 600 /dev/null "$CONFIG_FILE"
@@ -207,7 +207,7 @@ masquerade:
     dir: $MASQ_DIR
 EOF
 
-    # 伪装页：一个纯静态占位页，不引用任何外部资源，别人来探测只会看到这个
+    # Serve a static masquerade page with no external resources.
     mkdir -p "$MASQ_DIR"
     cat > "$MASQ_DIR/index.html" <<HTML
 <!DOCTYPE html>
@@ -235,15 +235,15 @@ EOF
 </html>
 HTML
 
-    # 服务以 $svcuser 运行，配置和伪装页都必须让它能读，否则起不来
+    # The service user ($svcuser) needs read access to the config and masquerade page.
     chown "$svcuser" "$CONFIG_FILE" 2>/dev/null \
-        || { chmod 644 "$CONFIG_FILE"; warn "无法把配置归属给 $svcuser，已放宽权限为 644"; }
+        || { chmod 644 "$CONFIG_FILE"; warn "Could not set the configuration owner to $svcuser. Permissions were set to 644."; }
     chown -R "$svcuser" "$MASQ_DIR" 2>/dev/null || true
     chmod 755 "$CONFIG_DIR" "$MASQ_DIR"
     chmod 644 "$MASQ_DIR/index.html"
 
     systemctl enable "$SERVICE" >/dev/null 2>&1
-    info "启动服务并等待证书签发（最多 60 秒）..."
+    info "Starting the service and waiting up to 60 seconds for certificate issuance ..."
     systemctl restart "$SERVICE"
 
     for i in $(seq 1 30); do
@@ -258,29 +258,29 @@ HTML
 
     echo
     if [ "$ok" = 1 ]; then
-        info "安装完成：服务运行中，证书已签发"
-        printf '  域名   : %s\n  端口   : %s/udp\n  密码   : %s\n  邮箱   : %s\n' \
+        info "Installation complete. The service is running and the certificate has been issued."
+        printf '  Domain         : %s\n  Port           : %s/udp\n  Password       : %s\n  Email          : %s\n' \
             "$domain" "$port" "$password" "$email"
-        printf '  配置   : %s\n' "$CONFIG_FILE"
-        printf '  伪装页 : %s\n' "$MASQ_DIR/index.html"
+        printf '  Config         : %s\n' "$CONFIG_FILE"
+        printf '  Masquerade page: %s\n' "$MASQ_DIR/index.html"
         if [ "$bw_up" = "0" ] && [ "$bw_down" = "0" ]; then
-            printf '  带宽   : 不限速（未设 bandwidth，不启用 Brutal）\n'
+            printf '  Bandwidth      : Unlimited (no bandwidth section, Brutal disabled)\n'
         else
-            printf '  带宽   : 上行 %s Mbps（客户端下载）/ 下行 %s Mbps（客户端上传）\n' \
+            printf '  Bandwidth      : %s Mbps server upload (client download) / %s Mbps server download (client upload)\n' \
                 "$bw_up" "$bw_down"
         fi
         if [[ $password =~ ^[A-Za-z0-9._~-]+$ ]]; then
-            printf '  客户端 : hysteria2://%s@%s:%s/?sni=%s#%s\n' \
+            printf '  Client URL     : hysteria2://%s@%s:%s/?sni=%s#%s\n' \
                 "$password" "$domain" "$port" "$domain" "$domain"
         else
-            warn "密码含特殊字符，客户端请按上面的域名/端口/密码手动填写"
+            warn "The password contains special characters. Enter the domain, port, and password manually in your client."
         fi
     else
-        err "60 秒内服务未就绪或证书未签发，最近日志："
+        err "The service failed to start or get a certificate within 60 seconds. Recent logs:"
         journalctl -u "$SERVICE" -n 30 --no-pager 2>/dev/null || true
         echo
-        warn "常见原因：域名没解析到本机 / 80 端口不通 / Cloudflare 开了 CDN / 防火墙没放行"
-        warn "配置已写入 $CONFIG_FILE，修好后执行：systemctl restart $SERVICE"
+        warn "Check DNS, TCP port 80 reachability, Cloudflare CDN settings, and firewall rules."
+        warn "Configuration saved to $CONFIG_FILE. After fixing the issue, run: systemctl restart $SERVICE"
     fi
     firewall_hint "$port"
     echo
@@ -289,42 +289,42 @@ HTML
 do_uninstall() {
     local svcuser
     svcuser=$(service_user)
-    confirm "确认卸载 Hysteria 2？将删除二进制、$CONFIG_DIR 和 $svcuser 用户及其数据" \
-        || { warn "已取消"; return 0; }
+    confirm "Uninstall Hysteria 2? This will delete the binary, $CONFIG_DIR, and the $svcuser user and its data." \
+        || { warn "Uninstall canceled"; return 0; }
 
-    info "调用官方卸载器 ..."
-    run_official_installer --remove || warn "官方卸载器返回非零，继续清理残留"
+    info "Running the official uninstaller ..."
+    run_official_installer --remove || warn "The official uninstaller returned a nonzero exit status. Continuing cleanup."
 
     rm -rf "$CONFIG_DIR"
     id "$svcuser" >/dev/null 2>&1 && userdel -r "$svcuser" 2>/dev/null
     rm -f "/etc/systemd/system/multi-user.target.wants/$SERVICE" \
           /etc/systemd/system/multi-user.target.wants/hysteria-server@*.service
     systemctl daemon-reload
-    info "已卸载"
+    info "Uninstall complete"
 }
 
 print_menu() {
-    echo "Hysteria 2 一键脚本（加固版）"
+    echo "Hysteria 2 one-click installer (hardened)"
     echo "==================================="
-    echo "1. 安装 Hysteria 2"
-    echo "2. 卸载 Hysteria 2"
-    echo "3. 停止 Hysteria 2"
-    echo "4. 启动 Hysteria 2"
-    echo "5. 重启 Hysteria 2"
-    echo "6. 设置开机自启"
-    echo "7. 关闭开机自启"
-    echo "8. 升级 Hysteria 2"
-    echo "9. 退出"
+    echo "1. Install Hysteria 2"
+    echo "2. Uninstall Hysteria 2"
+    echo "3. Stop Hysteria 2"
+    echo "4. Start Hysteria 2"
+    echo "5. Restart Hysteria 2"
+    echo "6. Enable startup at boot"
+    echo "7. Disable startup at boot"
+    echo "8. Upgrade Hysteria 2"
+    echo "9. Exit"
 }
 
 main() {
     need_root
     need_deps
-    [ -t 0 ] || warn "stdin 不是终端（例如 curl | bash），交互菜单会读不了输入，建议改用 bash <(curl ...)"
+    [ -t 0 ] || warn "The interactive menu requires terminal input. If using curl | bash, use bash <(curl ...) instead."
     local choice
     while true; do
         print_menu
-        read -rp "请选择 [1-9]: " choice || exit 0
+        read -rp "Select an option [1-9]: " choice || exit 0
         case $choice in
             1) do_install ;;
             2) do_uninstall ;;
@@ -334,8 +334,8 @@ main() {
             6) systemctl enable "$SERVICE" ;;
             7) systemctl disable "$SERVICE" ;;
             8) run_official_installer ;;
-            9) echo "退出"; exit 0 ;;
-            *) warn "无效选项：$choice" ;;
+            9) echo "Exiting"; exit 0 ;;
+            *) warn "Invalid option: $choice" ;;
         esac
         echo
     done
